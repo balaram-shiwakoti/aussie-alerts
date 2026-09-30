@@ -1,4 +1,53 @@
-deploy:
+name: Build test lint
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: dotnet tool restore
+      - run: dotnet restore AussieAlerts.slnx -m:1
+      - run: dotnet build AussieAlerts.slnx -m:1 --no-restore -c Release
+      - name: C# formatting
+        run: dotnet format whitespace . --folder --include src tests --exclude src/Api/obj src/Api/bin tests/Api.Tests/obj tests/Api.Tests/bin --verify-no-changes
+      - name: xUnit and real PostgreSQL Testcontainers tests
+        run: dotnet test tests/Api.Tests --no-build -c Release --logger trx
+      - run: dotnet ef migrations has-pending-model-changes --project src/Api
+      - run: npm ci --prefix web
+      - name: Check generated API contract
+        shell: bash
+        run: |
+          node scripts/setup.mjs
+          node scripts/run-api.mjs --contract > api-contract.log 2>&1 &
+          API_PID=$!
+          trap 'kill "$API_PID" || true' EXIT
+          for i in {1..60}; do
+            if curl --fail --silent http://localhost:8080/health/live; then break; fi
+            sleep 1
+          done
+          node scripts/export-openapi.mjs
+          npm --prefix web run generate:api
+          git diff --exit-code -- openapi.json web/src/api/schema.d.ts
+      - run: npm --prefix web run lint
+      - run: npm --prefix web test
+      - run: npm --prefix web run build
+      - name: Build production container
+        run: docker build --target production -t aussie-alerts:ci .
+
+  deploy:
     name: Build, push and deploy backend
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: verify
