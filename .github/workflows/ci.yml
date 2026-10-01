@@ -108,25 +108,6 @@ jobs:
               "jwt-key=$JWT_KEY" \
             --output none
 
-      - name: First-run only — let Container App pull the private GHCR image
-        env:
-          GHCR_USER: ${{ github.actor }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          az containerapp registry set \
-            --name "$CONTAINER_APP_NAME" \
-            --resource-group "$AZURE_RESOURCE_GROUP" \
-            --server ghcr.io \
-            --username "$GHCR_USER" \
-            --password "$GHCR_TOKEN" \
-            --output none
-          # After the first successful deploy: make the ghcr.io package public,
-          # then run:
-          #   az containerapp registry remove --name $CONTAINER_APP_NAME \
-          #     --resource-group $AZURE_RESOURCE_GROUP --server ghcr.io
-          # and delete this step. GITHUB_TOKEN expires when the job ends,
-          # which breaks a cold-start pull after the app scales to zero.
-
       - name: Fix ingress target port (app listens on 8080, not the default 80)
         run: |
           az containerapp ingress update \
